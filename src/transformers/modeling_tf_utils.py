@@ -659,7 +659,7 @@ class TFPreTrainedModel(tf.keras.Model, TFModelUtilsMixin, TFGenerationMixin, Pu
 
         Args:
             inputs (:obj:`Dict[str, tf.Tensor]`):
-                The input of the saved model as a dictionnary of tensors.
+                The input of the saved model as a dictionary of tensors.
         """
         output = self.call(inputs)
 
@@ -944,7 +944,7 @@ class TFPreTrainedModel(tf.keras.Model, TFModelUtilsMixin, TFGenerationMixin, Pu
                 vectors from the end. If not provided or :obj:`None`, just returns None
 
         Return:
-            :obj:`tf.Variable`: Pointer to the resized decoder or None if the output embeddings are differents of the
+            :obj:`tf.Variable`: Pointer to the resized decoder or None if the output embeddings are different from the
             input ones.
         """
         new_lm_head_decoder = old_lm_head_decoder
@@ -1128,7 +1128,7 @@ class TFPreTrainedModel(tf.keras.Model, TFModelUtilsMixin, TFGenerationMixin, Pu
                 The specific model version to use. It can be a branch name, a tag name, or a commit id, since we use a
                 git-based system for storing models and other artifacts on huggingface.co, so ``revision`` can be any
                 identifier allowed by git.
-            mirror(:obj:`str`, `optional`, defaults to :obj:`None`):
+            mirror(:obj:`str`, `optional`):
                 Mirror source to accelerate downloads in China. If you are from China and have an accessibility
                 problem, you can set this option to resolve it. Note that we do not guarantee the timeliness or safety.
                 Please refer to the mirror site for more information.

@@ -18,12 +18,12 @@ limitations under the License.
 
 ## GLUE tasks
 
-Based on the script [`run_glue.py`](https://github.com/huggingface/transformers/blob/master/examples/text-classification/run_glue.py).
+Based on the script [`run_glue.py`](https://github.com/huggingface/transformers/blob/master/examples/pytorch/text-classification/run_glue.py).
 
 Fine-tuning the library models for sequence classification on the GLUE benchmark: [General Language Understanding
 Evaluation](https://gluebenchmark.com/). This script can fine-tune any of the models on the [hub](https://huggingface.co/models)
-and can also be used for your own data in a csv or a JSON file (the script might need some tweaks in that case, refer
-to the comments inside for help).
+and can also be used for a dataset hosted on our [hub](https://huggingface.co/datasets) or your own data in a csv or a JSON file 
+(the script might need some tweaks in that case, refer to the comments inside for help).
 
 GLUE is made up of a total of 9 different tasks. Here is how to run the script on one of them:
 
@@ -64,6 +64,22 @@ single Titan RTX was used):
 Some of these results are significantly different from the ones reported on the test set of GLUE benchmark on the
 website. For QQP and WNLI, please refer to [FAQ #12](https://gluebenchmark.com/faq) on the website.
 
+The following example fine-tunes BERT on the `imdb` dataset hosted on our [hub](https://huggingface.co/datasets):
+
+```bash
+python run_glue.py \
+  --model_name_or_path bert-base-cased \
+  --dataset_name imdb  \
+  --do_train \
+  --do_predict \
+  --max_seq_length 128 \
+  --per_device_train_batch_size 32 \
+  --learning_rate 2e-5 \
+  --num_train_epochs 3 \
+  --output_dir /tmp/imdb/
+```
+
+
 ### Mixed precision training
 
 If you have a GPU with mixed precision capabilities (architecture Pascal or more recent), you can use mixed precision
@@ -87,7 +103,7 @@ Using mixed precision training usually results in 2x-speedup for training with t
 
 ## PyTorch version, no Trainer
 
-Based on the script [`run_glue_no_trainer.py`](https://github.com/huggingface/transformers/blob/master/examples/text-classification/run_glue_no_trainer.py).
+Based on the script [`run_glue_no_trainer.py`](https://github.com/huggingface/transformers/blob/master/examples/pytorch/text-classification/run_glue_no_trainer.py).
 
 Like `run_glue.py`, this script allows you to fine-tune any of the models on the [hub](https://huggingface.co/models) on a
 text classification task, either a GLUE task or your own data in a csv or a JSON file. The main difference is that this

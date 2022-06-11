@@ -13,8 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ XLM configuration"""
+from collections import OrderedDict
+from typing import Mapping
 
 from ...configuration_utils import PretrainedConfig
+from ...onnx import OnnxConfig
 from ...utils import logging
 
 
@@ -169,7 +172,7 @@ class XLMConfig(PretrainedConfig):
         n_langs=1,
         use_lang_emb=True,
         max_position_embeddings=512,
-        embed_init_std=2048 ** -0.5,
+        embed_init_std=2048**-0.5,
         layer_norm_eps=1e-12,
         init_std=0.02,
         bos_index=0,
@@ -228,3 +231,20 @@ class XLMConfig(PretrainedConfig):
             self.n_words = kwargs["n_words"]
 
         super().__init__(pad_token_id=pad_token_id, bos_token_id=bos_token_id, **kwargs)
+
+
+# Copied from transformers.models.bert.configuration_bert.BertOnnxConfig
+class XLMOnnxConfig(OnnxConfig):
+    @property
+    def inputs(self) -> Mapping[str, Mapping[int, str]]:
+        if self.task == "multiple-choice":
+            dynamic_axis = {0: "batch", 1: "choice", 2: "sequence"}
+        else:
+            dynamic_axis = {0: "batch", 1: "sequence"}
+        return OrderedDict(
+            [
+                ("input_ids", dynamic_axis),
+                ("attention_mask", dynamic_axis),
+                ("token_type_ids", dynamic_axis),
+            ]
+        )

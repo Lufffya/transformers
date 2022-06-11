@@ -22,7 +22,8 @@ import PIL.ImageOps
 
 import requests
 
-from .file_utils import _is_torch, is_torch_available
+from .utils import is_torch_available
+from .utils.generic import _is_torch
 
 
 IMAGENET_DEFAULT_MEAN = [0.485, 0.456, 0.406]
@@ -115,6 +116,20 @@ class ImageFeatureExtractionMixin:
             return PIL.Image.fromarray(image)
         return image
 
+    def convert_rgb(self, image):
+        """
+        Converts `PIL.Image.Image` to RGB format.
+
+        Args:
+            image (`PIL.Image.Image`):
+                The image to convert.
+        """
+        self._ensure_format_supported(image)
+        if not isinstance(image, PIL.Image.Image):
+            return image
+
+        return image.convert("RGB")
+
     def to_numpy_array(self, image, rescale=None, channel_first=True):
         """
         Converts `image` to a numpy array. Optionally rescales it and puts the channel dimension as the first
@@ -146,6 +161,26 @@ class ImageFeatureExtractionMixin:
         if channel_first and image.ndim == 3:
             image = image.transpose(2, 0, 1)
 
+        return image
+
+    def expand_dims(self, image):
+        """
+        Expands 2-dimensional `image` to 3 dimensions.
+
+        Args:
+            image (`PIL.Image.Image` or `np.ndarray` or `torch.Tensor`):
+                The image to expand.
+        """
+        self._ensure_format_supported(image)
+
+        # Do nothing if PIL image
+        if isinstance(image, PIL.Image.Image):
+            return image
+
+        if is_torch_tensor(image):
+            image = image.unsqueeze(0)
+        else:
+            image = np.expand_dims(image, axis=0)
         return image
 
     def normalize(self, image, mean, std):
@@ -184,26 +219,68 @@ class ImageFeatureExtractionMixin:
         else:
             return (image - mean) / std
 
-    def resize(self, image, size, resample=PIL.Image.BILINEAR):
+    def resize(self, image, size, resample=PIL.Image.BILINEAR, default_to_square=True, max_size=None):
         """
-        Resizes `image`. Note that this will trigger a conversion of `image` to a PIL Image.
+        Resizes `image`. Enforces conversion of input to PIL.Image.
 
         Args:
             image (`PIL.Image.Image` or `np.ndarray` or `torch.Tensor`):
                 The image to resize.
             size (`int` or `Tuple[int, int]`):
-                The size to use for resizing the image.
+                The size to use for resizing the image. If `size` is a sequence like (h, w), output size will be
+                matched to this.
+
+                If `size` is an int and `default_to_square` is `True`, then image will be resized to (size, size). If
+                `size` is an int and `default_to_square` is `False`, then smaller edge of the image will be matched to
+                this number. i.e, if height > width, then image will be rescaled to (size * height / width, size).
             resample (`int`, *optional*, defaults to `PIL.Image.BILINEAR`):
                 The filter to user for resampling.
+            default_to_square (`bool`, *optional*, defaults to `True`):
+                How to convert `size` when it is a single int. If set to `True`, the `size` will be converted to a
+                square (`size`,`size`). If set to `False`, will replicate
+                [`torchvision.transforms.Resize`](https://pytorch.org/vision/stable/transforms.html#torchvision.transforms.Resize)
+                with support for resizing only the smallest edge and providing an optional `max_size`.
+            max_size (`int`, *optional*, defaults to `None`):
+                The maximum allowed for the longer edge of the resized image: if the longer edge of the image is
+                greater than `max_size` after being resized according to `size`, then the image is resized again so
+                that the longer edge is equal to `max_size`. As a result, `size` might be overruled, i.e the smaller
+                edge may be shorter than `size`. Only used if `default_to_square` is `False`.
+
+        Returns:
+            image: A resized `PIL.Image.Image`.
         """
         self._ensure_format_supported(image)
 
-        if isinstance(size, int):
-            size = (size, size)
-        elif isinstance(size, list):
-            size = tuple(size)
         if not isinstance(image, PIL.Image.Image):
             image = self.to_pil_image(image)
+
+        if isinstance(size, list):
+            size = tuple(size)
+
+        if isinstance(size, int) or len(size) == 1:
+            if default_to_square:
+                size = (size, size) if isinstance(size, int) else (size[0], size[0])
+            else:
+                width, height = image.size
+                # specified size only for the smallest edge
+                short, long = (width, height) if width <= height else (height, width)
+                requested_new_short = size if isinstance(size, int) else size[0]
+
+                if short == requested_new_short:
+                    return image
+
+                new_short, new_long = requested_new_short, int(requested_new_short * long / short)
+
+                if max_size is not None:
+                    if max_size <= requested_new_short:
+                        raise ValueError(
+                            f"max_size = {max_size} must be strictly greater than the requested "
+                            f"size for the smaller edge size = {size}"
+                        )
+                    if new_long > max_size:
+                        new_short, new_long = int(max_size * new_short / new_long), max_size
+
+                size = (new_short, new_long) if width <= height else (new_long, new_short)
 
         return image.resize(size, resample=resample)
 
@@ -213,17 +290,28 @@ class ImageFeatureExtractionMixin:
         size given, it will be padded (so the returned result has the size asked).
 
         Args:
-            image (`PIL.Image.Image` or `np.ndarray` or `torch.Tensor`):
+            image (`PIL.Image.Image` or `np.ndarray` or `torch.Tensor` of shape (n_channels, height, width) or (height, width, n_channels)):
                 The image to resize.
             size (`int` or `Tuple[int, int]`):
                 The size to which crop the image.
+
+        Returns:
+            new_image: A center cropped `PIL.Image.Image` or `np.ndarray` or `torch.Tensor` of shape: (n_channels,
+            height, width).
         """
         self._ensure_format_supported(image)
+
         if not isinstance(size, tuple):
             size = (size, size)
 
         # PIL Image.size is (width, height) but NumPy array and torch Tensors have (height, width)
-        image_shape = (image.size[1], image.size[0]) if isinstance(image, PIL.Image.Image) else image.shape[-2:]
+        if is_torch_tensor(image) or isinstance(image, np.ndarray):
+            if image.ndim == 2:
+                image = self.expand_dims(image)
+            image_shape = image.shape[1:] if image.shape[0] in [1, 3] else image.shape[:2]
+        else:
+            image_shape = (image.size[1], image.size[0])
+
         top = (image_shape[0] - size[0]) // 2
         bottom = top + size[0]  # In case size is odd, (image_shape[0] + size[0]) // 2 won't give the proper result.
         left = (image_shape[1] - size[1]) // 2
@@ -233,7 +321,17 @@ class ImageFeatureExtractionMixin:
         if isinstance(image, PIL.Image.Image):
             return image.crop((left, top, right, bottom))
 
-        # Check if all the dimensions are inside the image.
+        # Check if image is in (n_channels, height, width) or (height, width, n_channels) format
+        channel_first = True if image.shape[0] in [1, 3] else False
+
+        # Transpose (height, width, n_channels) format images
+        if not channel_first:
+            if isinstance(image, np.ndarray):
+                image = image.transpose(2, 0, 1)
+            if is_torch_tensor(image):
+                image = image.permute(2, 0, 1)
+
+        # Check if cropped area is within image boundaries
         if top >= 0 and bottom <= image_shape[0] and left >= 0 and right <= image_shape[1]:
             return image[..., top:bottom, left:right]
 
@@ -255,6 +353,8 @@ class ImageFeatureExtractionMixin:
         left += left_pad
         right += left_pad
 
-        return new_image[
+        new_image = new_image[
             ..., max(0, top) : min(new_image.shape[-2], bottom), max(0, left) : min(new_image.shape[-1], right)
         ]
+
+        return new_image

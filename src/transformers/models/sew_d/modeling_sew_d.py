@@ -175,7 +175,7 @@ def _compute_mask_indices(
     )
     spec_aug_mask_idxs = spec_aug_mask_idxs.reshape(batch_size, max_num_masked_span * mask_length)
 
-    # add offset to the starting indexes so that that indexes now create a span
+    # add offset to the starting indexes so that indexes now create a span
     offsets = np.arange(mask_length)[None, None, :]
     offsets = np.broadcast_to(offsets, (batch_size, max_num_masked_span, mask_length)).reshape(
         batch_size, max_num_masked_span * mask_length
@@ -557,7 +557,9 @@ class XSoftmax(torch.autograd.Function):
             g.op("Sub", g.op("Constant", value_t=torch.tensor(1, dtype=torch.int64)), mask_cast_value),
             to_i=sym_help.cast_pytorch_to_onnx["Byte"],
         )
-        output = masked_fill(g, self, r_mask, g.op("Constant", value_t=torch.tensor(torch.finfo(self.dtype).min)))
+        output = masked_fill(
+            g, self, r_mask, g.op("Constant", value_t=torch.tensor(torch.finfo(self.type().dtype()).min))
+        )
         output = softmax(g, output, dim)
         return masked_fill(g, output, r_mask, g.op("Constant", value_t=torch.tensor(0, dtype=torch.uint8)))
 
@@ -592,6 +594,21 @@ class XDropout(torch.autograd.Function):
             return grad_output.masked_fill(mask, 0) * ctx.scale, None
         else:
             return grad_output, None
+
+    @staticmethod
+    def symbolic(g: torch._C.Graph, input: torch._C.Value, local_ctx: Union[float, DropoutContext]) -> torch._C.Value:
+        dropout_p = local_ctx
+        if isinstance(local_ctx, DropoutContext):
+            dropout_p = local_ctx.dropout
+        # StableDropout only calls this function when training.
+        train = True
+        # TODO: We should check if the opset_version being used to export
+        # is > 12 here, but there's no good way to do that. As-is, if the
+        # opset_version < 12, export will fail with a CheckerError.
+        # Once https://github.com/pytorch/pytorch/issues/78391 is fixed, do something like:
+        # if opset_version < 12:
+        #   return torch.onnx.symbolic_opset9.dropout(g, input, dropout_p, train)
+        return torch.onnx.symbolic_opset12.dropout(g, input, dropout_p, train)
 
 
 # Copied from transformers.models.deberta.modeling_deberta.StableDropout

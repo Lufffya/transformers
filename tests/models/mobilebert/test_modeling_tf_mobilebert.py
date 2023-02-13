@@ -17,6 +17,7 @@
 import unittest
 
 from transformers import MobileBertConfig, is_tf_available
+from transformers.models.auto import get_values
 from transformers.testing_utils import require_tf, slow, tooslow
 
 from ...test_configuration_common import ConfigTester
@@ -27,6 +28,7 @@ if is_tf_available():
     import tensorflow as tf
 
     from transformers import (
+        TF_MODEL_FOR_PRETRAINING_MAPPING,
         TFMobileBertForMaskedLM,
         TFMobileBertForMultipleChoice,
         TFMobileBertForNextSentencePrediction,
@@ -40,7 +42,6 @@ if is_tf_available():
 
 @require_tf
 class TFMobileBertModelTest(TFModelTesterMixin, unittest.TestCase):
-
     all_model_classes = (
         (
             TFMobileBertModel,
@@ -57,6 +58,16 @@ class TFMobileBertModelTest(TFModelTesterMixin, unittest.TestCase):
     )
     test_head_masking = False
     test_onnx = False
+
+    # special case for ForPreTraining model, same as BERT tests
+    def _prepare_for_class(self, inputs_dict, model_class, return_labels=False):
+        inputs_dict = super()._prepare_for_class(inputs_dict, model_class, return_labels=return_labels)
+
+        if return_labels:
+            if model_class in get_values(TF_MODEL_FOR_PRETRAINING_MAPPING):
+                inputs_dict["next_sentence_label"] = tf.zeros(self.model_tester.batch_size, dtype=tf.int32)
+
+        return inputs_dict
 
     class TFMobileBertModelTester(object):
         def __init__(
@@ -305,6 +316,11 @@ class TFMobileBertModelTest(TFModelTesterMixin, unittest.TestCase):
                 assert x is None
                 name = model.get_bias()
                 assert name is None
+
+    @slow
+    def test_keras_fit(self):
+        # Override as it is a slow test on this model
+        super().test_keras_fit()
 
     @tooslow
     def test_saved_model_creation(self):

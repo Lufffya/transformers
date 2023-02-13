@@ -6,10 +6,9 @@ from functools import partial
 from typing import Dict, List, Optional, Set, Tuple, Type
 
 from datasets import Dataset
-from tqdm import tqdm
-
 from datasketch import MinHash, MinHashLSH
 from dpu_utils.utils.iterators import ThreadedIterator
+from tqdm import tqdm
 
 
 NON_ALPHA = re.compile("[^A-Za-z_0-9]")
@@ -63,7 +62,6 @@ class DuplicationIndex:
 
         self._index.insert(code_key, min_hash)
         if len(close_duplicates) > 0:
-
             for base_duplicate in close_duplicates:
                 if base_duplicate in self._duplicate_clusters:
                     self._duplicate_clusters[base_duplicate].add(code_key)

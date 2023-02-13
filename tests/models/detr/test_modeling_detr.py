@@ -23,7 +23,7 @@ from transformers import DetrConfig, is_timm_available, is_vision_available
 from transformers.testing_utils import require_timm, require_vision, slow, torch_device
 from transformers.utils import cached_property
 
-from ...generation.test_generation_utils import GenerationTesterMixin
+from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, _config_zero_init, floats_tensor
 
@@ -31,7 +31,7 @@ from ...test_modeling_common import ModelTesterMixin, _config_zero_init, floats_
 if is_timm_available():
     import torch
 
-    from transformers import DetrForObjectDetection, DetrForSegmentation, DetrModel
+    from transformers import DetrForObjectDetection, DetrForSegmentation, DetrModel, ResNetConfig
 
 
 if is_vision_available():
@@ -153,6 +153,25 @@ class DetrModelTester:
         self.parent.assertEqual(result.logits.shape, (self.batch_size, self.num_queries, self.num_labels + 1))
         self.parent.assertEqual(result.pred_boxes.shape, (self.batch_size, self.num_queries, 4))
 
+    def create_and_check_no_timm_backbone(self, config, pixel_values, pixel_mask, labels):
+        config.use_timm_backbone = False
+        config.backbone_config = ResNetConfig()
+        model = DetrForObjectDetection(config=config)
+        model.to(torch_device)
+        model.eval()
+
+        result = model(pixel_values=pixel_values, pixel_mask=pixel_mask)
+        result = model(pixel_values)
+
+        self.parent.assertEqual(result.logits.shape, (self.batch_size, self.num_queries, self.num_labels + 1))
+        self.parent.assertEqual(result.pred_boxes.shape, (self.batch_size, self.num_queries, 4))
+
+        result = model(pixel_values=pixel_values, pixel_mask=pixel_mask, labels=labels)
+
+        self.parent.assertEqual(result.loss.shape, ())
+        self.parent.assertEqual(result.logits.shape, (self.batch_size, self.num_queries, self.num_labels + 1))
+        self.parent.assertEqual(result.pred_boxes.shape, (self.batch_size, self.num_queries, 4))
+
 
 @require_timm
 class DetrModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
@@ -212,6 +231,10 @@ class DetrModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
     def test_detr_object_detection_head_model(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
         self.model_tester.create_and_check_detr_object_detection_head_model(*config_and_inputs)
+
+    def test_detr_no_timm_backbone(self):
+        config_and_inputs = self.model_tester.prepare_config_and_inputs()
+        self.model_tester.create_and_check_no_timm_backbone(*config_and_inputs)
 
     @unittest.skip(reason="DETR does not use inputs_embeds")
     def test_inputs_embeds(self):
@@ -413,6 +436,26 @@ class DetrModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
                     self.model_tester.num_labels + 1,
                 )
                 self.assertEqual(outputs.logits.shape, expected_shape)
+
+            self.assertTrue(outputs)
+
+    def test_greyscale_images(self):
+        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
+
+        # use greyscale pixel values
+        inputs_dict["pixel_values"] = floats_tensor(
+            [self.model_tester.batch_size, 1, self.model_tester.min_size, self.model_tester.max_size]
+        )
+
+        # let's set num_channels to 1
+        config.num_channels = 1
+
+        for model_class in self.all_model_classes:
+            model = model_class(config)
+            model.to(torch_device)
+            model.eval()
+            with torch.no_grad():
+                outputs = model(**self._prepare_for_class(inputs_dict, model_class))
 
             self.assertTrue(outputs)
 

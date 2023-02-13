@@ -288,7 +288,6 @@ class TFSegformerModelTest(TFModelTesterMixin, unittest.TestCase):
             check_hidden_states_output(inputs_dict, config, model_class)
 
     def test_model_outputs_equivalence(self):
-
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
 
         def check_equivalence(model, tuple_inputs, dict_inputs, additional_kwargs={}):
@@ -332,7 +331,7 @@ class TFSegformerModelTest(TFModelTesterMixin, unittest.TestCase):
 
     @unittest.skipIf(
         not is_tf_available() or len(tf.config.list_physical_devices("GPU")) == 0,
-        reason="TF (<=2.8) does not support backprop for grouped convolutions on CPU.",
+        reason="TF does not support backprop for grouped convolutions on CPU.",
     )
     def test_dataset_conversion(self):
         super().test_dataset_conversion()
@@ -342,7 +341,7 @@ class TFSegformerModelTest(TFModelTesterMixin, unittest.TestCase):
 
     @unittest.skipIf(
         not is_tf_available() or len(tf.config.list_physical_devices("GPU")) == 0,
-        reason="TF (<=2.8) does not support backprop for grouped convolutions on CPU.",
+        reason="TF does not support backprop for grouped convolutions on CPU.",
     )
     def test_keras_fit(self):
         config, _ = self.model_tester.prepare_config_and_inputs_for_common()

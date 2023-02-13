@@ -20,8 +20,7 @@ from typing import Dict, List, Optional, Union
 import numpy as np
 
 from .feature_extraction_utils import BatchFeature, FeatureExtractionMixin
-from .utils import PaddingStrategy, TensorType, is_tf_available, is_torch_available, logging, to_numpy
-from .utils.generic import _is_tensorflow, _is_torch
+from .utils import PaddingStrategy, TensorType, is_tf_tensor, is_torch_tensor, logging, to_numpy
 
 
 logger = logging.get_logger(__name__)
@@ -35,7 +34,7 @@ class SequenceFeatureExtractor(FeatureExtractionMixin):
         feature_size (`int`):
             The feature dimension of the extracted features.
         sampling_rate (`int`):
-            The sampling rate at which the audio files should be digitalized expressed in Hertz per second (Hz).
+            The sampling rate at which the audio files should be digitalized expressed in hertz (Hz).
         padding_value (`float`):
             The value that is used to fill the padding values / vectors.
     """
@@ -108,7 +107,7 @@ class SequenceFeatureExtractor(FeatureExtractionMixin):
                 If set will pad the sequence to a multiple of the provided value.
 
                 This is especially useful to enable the use of Tensor Cores on NVIDIA hardware with compute capability
-                >= 7.5 (Volta), or on TPUs which benefit from having sequence lengths be a multiple of 128.
+                `>= 7.5` (Volta), or on TPUs which benefit from having sequence lengths be a multiple of 128.
             return_attention_mask (`bool`, *optional*):
                 Whether to return the attention mask. If left to the default, will return the attention mask according
                 to the specific feature_extractor's default.
@@ -160,9 +159,9 @@ class SequenceFeatureExtractor(FeatureExtractionMixin):
                 first_element = required_input[index][0]
 
         if return_tensors is None:
-            if is_tf_available() and _is_tensorflow(first_element):
+            if is_tf_tensor(first_element):
                 return_tensors = "tf"
-            elif is_torch_available() and _is_torch(first_element):
+            elif is_torch_tensor(first_element):
                 return_tensors = "pt"
             elif isinstance(first_element, (int, float, list, tuple, np.ndarray)):
                 return_tensors = "np"
@@ -251,7 +250,7 @@ class SequenceFeatureExtractor(FeatureExtractionMixin):
                     - 'right': pads on the right of the sequences
             pad_to_multiple_of: (optional) Integer if set will pad the sequence to a multiple of the provided value.
                 This is especially useful to enable the use of Tensor Core on NVIDIA hardware with compute capability
-                >= 7.5 (Volta), or on TPUs which benefit from having sequence lengths be a multiple of 128.
+                `>= 7.5` (Volta), or on TPUs which benefit from having sequence lengths be a multiple of 128.
             return_attention_mask:
                 (optional) Set to False to avoid returning attention mask (default: set to model specifics)
         """
@@ -310,7 +309,7 @@ class SequenceFeatureExtractor(FeatureExtractionMixin):
             max_length: maximum length of the returned list and optionally padding length (see below)
             pad_to_multiple_of: (optional) Integer if set will pad the sequence to a multiple of the provided value.
                 This is especially useful to enable the use of Tensor Core on NVIDIA hardware with compute capability
-                >= 7.5 (Volta), or on TPUs which benefit from having sequence lengths be a multiple of 128.
+                `>= 7.5` (Volta), or on TPUs which benefit from having sequence lengths be a multiple of 128.
             truncation:
                 (optional) Activates truncation to cut input sequences longer than `max_length` to `max_length`.
         """

@@ -30,7 +30,7 @@ from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from ...activations import ACT2FN
 from ...modeling_outputs import BaseModelOutputWithCrossAttentions
 from ...modeling_utils import PreTrainedModel
-from ...pytorch_utils import apply_chunking_to_forward, find_pruneable_heads_and_indices, prune_linear_layer
+from ...pytorch_utils import apply_chunking_to_forward, find_pruneable_heads_and_indices, meshgrid, prune_linear_layer
 from ...utils import (
     ModelOutput,
     add_start_docstrings,
@@ -50,7 +50,6 @@ logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "deepmind/language-perceiver"
 _CONFIG_FOR_DOC = "PerceiverConfig"
-_TOKENIZER_FOR_DOC = "PerceiverTokenizer"
 
 PERCEIVER_PRETRAINED_MODEL_ARCHIVE_LIST = [
     "deepmind/language-perceiver",
@@ -768,7 +767,7 @@ class PerceiverModel(PerceiverPreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import PerceiverConfig, PerceiverTokenizer, PerceiverFeatureExtractor, PerceiverModel
+        >>> from transformers import PerceiverConfig, PerceiverTokenizer, PerceiverImageProcessor, PerceiverModel
         >>> from transformers.models.perceiver.modeling_perceiver import (
         ...     PerceiverTextPreprocessor,
         ...     PerceiverImagePreprocessor,
@@ -801,6 +800,8 @@ class PerceiverModel(PerceiverPreTrainedModel):
         >>> with torch.no_grad():
         ...     outputs = model(inputs=inputs)
         >>> logits = outputs.logits
+        >>> list(logits.shape)
+        [1, 2]
 
         >>> # to train, one can train the model using standard cross-entropy:
         >>> criterion = torch.nn.CrossEntropyLoss()
@@ -810,6 +811,7 @@ class PerceiverModel(PerceiverPreTrainedModel):
 
         >>> # EXAMPLE 2: using the Perceiver to classify images
         >>> # - we define an ImagePreprocessor, which can be used to embed images
+        >>> config = PerceiverConfig(image_size=224)
         >>> preprocessor = PerceiverImagePreprocessor(
         ...     config,
         ...     prep_type="conv1x1",
@@ -836,14 +838,16 @@ class PerceiverModel(PerceiverPreTrainedModel):
         ... )
 
         >>> # you can then do a forward pass as follows:
-        >>> feature_extractor = PerceiverFeatureExtractor()
+        >>> image_processor = PerceiverImageProcessor()
         >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
         >>> image = Image.open(requests.get(url, stream=True).raw)
-        >>> inputs = feature_extractor(image, return_tensors="pt").pixel_values
+        >>> inputs = image_processor(image, return_tensors="pt").pixel_values
 
         >>> with torch.no_grad():
         ...     outputs = model(inputs=inputs)
         >>> logits = outputs.logits
+        >>> list(logits.shape)
+        [1, 2]
 
         >>> # to train, one can train the model using standard cross-entropy:
         >>> criterion = torch.nn.CrossEntropyLoss()
@@ -1002,10 +1006,10 @@ class PerceiverForMaskedLM(PerceiverPreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import PerceiverTokenizer, PerceiverForMaskedLM
+        >>> from transformers import AutoTokenizer, PerceiverForMaskedLM
         >>> import torch
 
-        >>> tokenizer = PerceiverTokenizer.from_pretrained("deepmind/language-perceiver")
+        >>> tokenizer = AutoTokenizer.from_pretrained("deepmind/language-perceiver")
         >>> model = PerceiverForMaskedLM.from_pretrained("deepmind/language-perceiver")
 
         >>> # training
@@ -1017,7 +1021,12 @@ class PerceiverForMaskedLM(PerceiverPreTrainedModel):
 
         >>> outputs = model(**inputs, labels=labels)
         >>> loss = outputs.loss
+        >>> round(loss.item(), 2)
+        19.87
+
         >>> logits = outputs.logits
+        >>> list(logits.shape)
+        [1, 2048, 262]
 
         >>> # inference
         >>> text = "This is an incomplete sentence where some words are missing."
@@ -1030,6 +1039,8 @@ class PerceiverForMaskedLM(PerceiverPreTrainedModel):
         >>> with torch.no_grad():
         ...     outputs = model(**encoding)
         >>> logits = outputs.logits
+        >>> list(logits.shape)
+        [1, 2048, 262]
 
         >>> masked_tokens_predictions = logits[0, 52:61].argmax(dim=-1).tolist()
         >>> tokenizer.decode(masked_tokens_predictions)
@@ -1119,15 +1130,17 @@ class PerceiverForSequenceClassification(PerceiverPreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import PerceiverTokenizer, PerceiverForSequenceClassification
+        >>> from transformers import AutoTokenizer, PerceiverForSequenceClassification
 
-        >>> tokenizer = PerceiverTokenizer.from_pretrained("deepmind/language-perceiver")
+        >>> tokenizer = AutoTokenizer.from_pretrained("deepmind/language-perceiver")
         >>> model = PerceiverForSequenceClassification.from_pretrained("deepmind/language-perceiver")
 
         >>> text = "hello world"
         >>> inputs = tokenizer(text, return_tensors="pt").input_ids
         >>> outputs = model(inputs=inputs)
         >>> logits = outputs.logits
+        >>> list(logits.shape)
+        [1, 2]
         ```"""
         if inputs is not None and input_ids is not None:
             raise ValueError("You cannot use both `inputs` and `input_ids`")
@@ -1252,22 +1265,26 @@ class PerceiverForImageClassificationLearned(PerceiverPreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import PerceiverFeatureExtractor, PerceiverForImageClassificationLearned
+        >>> from transformers import AutoImageProcessor, PerceiverForImageClassificationLearned
         >>> from PIL import Image
         >>> import requests
 
         >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
         >>> image = Image.open(requests.get(url, stream=True).raw)
 
-        >>> feature_extractor = PerceiverFeatureExtractor.from_pretrained("deepmind/vision-perceiver-learned")
+        >>> image_processor = AutoImageProcessor.from_pretrained("deepmind/vision-perceiver-learned")
         >>> model = PerceiverForImageClassificationLearned.from_pretrained("deepmind/vision-perceiver-learned")
 
-        >>> inputs = feature_extractor(images=image, return_tensors="pt").pixel_values
+        >>> inputs = image_processor(images=image, return_tensors="pt").pixel_values
         >>> outputs = model(inputs=inputs)
         >>> logits = outputs.logits
+        >>> list(logits.shape)
+        [1, 1000]
+
         >>> # model predicts one of the 1000 ImageNet classes
         >>> predicted_class_idx = logits.argmax(-1).item()
         >>> print("Predicted class:", model.config.id2label[predicted_class_idx])
+        Predicted class: tabby, tabby cat
         ```"""
         if inputs is not None and pixel_values is not None:
             raise ValueError("You cannot use both `inputs` and `pixel_values`")
@@ -1389,22 +1406,26 @@ class PerceiverForImageClassificationFourier(PerceiverPreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import PerceiverFeatureExtractor, PerceiverForImageClassificationFourier
+        >>> from transformers import AutoImageProcessor, PerceiverForImageClassificationFourier
         >>> from PIL import Image
         >>> import requests
 
         >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
         >>> image = Image.open(requests.get(url, stream=True).raw)
 
-        >>> feature_extractor = PerceiverFeatureExtractor.from_pretrained("deepmind/vision-perceiver-fourier")
+        >>> image_processor = AutoImageProcessor.from_pretrained("deepmind/vision-perceiver-fourier")
         >>> model = PerceiverForImageClassificationFourier.from_pretrained("deepmind/vision-perceiver-fourier")
 
-        >>> inputs = feature_extractor(images=image, return_tensors="pt").pixel_values
+        >>> inputs = image_processor(images=image, return_tensors="pt").pixel_values
         >>> outputs = model(inputs=inputs)
         >>> logits = outputs.logits
+        >>> list(logits.shape)
+        [1, 1000]
+
         >>> # model predicts one of the 1000 ImageNet classes
         >>> predicted_class_idx = logits.argmax(-1).item()
         >>> print("Predicted class:", model.config.id2label[predicted_class_idx])
+        Predicted class: tabby, tabby cat
         ```"""
         if inputs is not None and pixel_values is not None:
             raise ValueError("You cannot use both `inputs` and `pixel_values`")
@@ -1526,22 +1547,26 @@ class PerceiverForImageClassificationConvProcessing(PerceiverPreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import PerceiverFeatureExtractor, PerceiverForImageClassificationConvProcessing
+        >>> from transformers import AutoImageProcessor, PerceiverForImageClassificationConvProcessing
         >>> from PIL import Image
         >>> import requests
 
         >>> url = "http://images.cocodataset.org/val2017/000000039769.jpg"
         >>> image = Image.open(requests.get(url, stream=True).raw)
 
-        >>> feature_extractor = PerceiverFeatureExtractor.from_pretrained("deepmind/vision-perceiver-conv")
+        >>> image_processor = AutoImageProcessor.from_pretrained("deepmind/vision-perceiver-conv")
         >>> model = PerceiverForImageClassificationConvProcessing.from_pretrained("deepmind/vision-perceiver-conv")
 
-        >>> inputs = feature_extractor(images=image, return_tensors="pt").pixel_values
+        >>> inputs = image_processor(images=image, return_tensors="pt").pixel_values
         >>> outputs = model(inputs=inputs)
         >>> logits = outputs.logits
+        >>> list(logits.shape)
+        [1, 1000]
+
         >>> # model predicts one of the 1000 ImageNet classes
         >>> predicted_class_idx = logits.argmax(-1).item()
         >>> print("Predicted class:", model.config.id2label[predicted_class_idx])
+        Predicted class: tabby, tabby cat
         ```"""
         if inputs is not None and pixel_values is not None:
             raise ValueError("You cannot use both `inputs` and `pixel_values`")
@@ -1689,6 +1714,8 @@ class PerceiverForOpticalFlow(PerceiverPreTrainedModel):
         >>> patches = torch.randn(1, 2, 27, 368, 496)
         >>> outputs = model(inputs=patches)
         >>> logits = outputs.logits
+        >>> list(logits.shape)
+        [1, 368, 496, 2]
         ```"""
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -1915,6 +1942,14 @@ class PerceiverForMultimodalAutoencoding(PerceiverPreTrainedModel):
 
         >>> outputs = model(inputs=inputs, subsampled_output_points=subsampling)
         >>> logits = outputs.logits
+        >>> list(logits["audio"].shape)
+        [1, 240]
+
+        >>> list(logits["image"].shape)
+        [1, 6272, 3]
+
+        >>> list(logits["label"].shape)
+        [1, 700]
         ```"""
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
@@ -2407,7 +2442,7 @@ class PerceiverMultimodalDecoder(PerceiverAbstractDecoder):
         output_num_channels: int,
         min_padding_size: Optional[int] = 2,
         subsampled_index_dims: Optional[Dict[str, PerceiverAbstractDecoder]] = None,
-        **decoder_kwargs
+        **decoder_kwargs,
     ) -> None:
         super().__init__()
         self.modalities = nn.ModuleDict(modalities)
@@ -2668,7 +2703,7 @@ def build_linear_positions(index_dims, output_range=(-1.0, 1.0)):
         return torch.linspace(start=output_range[0], end=output_range[1], steps=n_xels_per_dim, dtype=torch.float32)
 
     dim_ranges = [_linspace(n_xels_per_dim) for n_xels_per_dim in index_dims]
-    array_index_grid = torch.meshgrid(*dim_ranges)
+    array_index_grid = meshgrid(*dim_ranges, indexing="ij")
 
     return torch.stack(array_index_grid, dim=-1)
 
@@ -2925,7 +2960,6 @@ class PerceiverAudioPostprocessor(nn.Module):
         self.classifier = nn.Linear(in_channels, config.samples_per_patch)
 
     def forward(self, inputs: torch.Tensor, pos: Optional[torch.Tensor] = None, modality_sizes=None) -> torch.Tensor:
-
         logits = self.classifier(inputs)
         return torch.reshape(logits, [inputs.shape[0], -1])
 
@@ -3095,7 +3129,7 @@ class PerceiverImagePreprocessor(AbstractPreprocessor):
 
         return inp_dim + pos_dim
 
-    def _build_network_inputs(self, inputs: torch.Tensor, pos: torch.Tensor, network_input_is_1d: bool = True):
+    def _build_network_inputs(self, inputs: torch.Tensor, network_input_is_1d: bool = True):
         """
         Construct the final input, including position encoding.
 
@@ -3168,13 +3202,13 @@ class PerceiverImagePreprocessor(AbstractPreprocessor):
         if self.prep_type != "patches":
             # move channels to last dimension, as the _build_network_inputs method below expects this
             if inputs.ndim == 4:
-                inputs = torch.permute(inputs, (0, 2, 3, 1))
+                inputs = inputs.permute(0, 2, 3, 1)
             elif inputs.ndim == 5:
-                inputs = torch.permute(inputs, (0, 1, 3, 4, 2))
+                inputs = inputs.permute(0, 1, 3, 4, 2)
             else:
                 raise ValueError("Unsupported data format for conv1x1.")
 
-        inputs, inputs_without_pos = self._build_network_inputs(inputs, pos, network_input_is_1d)
+        inputs, inputs_without_pos = self._build_network_inputs(inputs, network_input_is_1d)
         modality_sizes = None  # Size for each modality, only needed for multimodal
 
         return inputs, modality_sizes, inputs_without_pos
@@ -3273,7 +3307,7 @@ class PerceiverAudioPreprocessor(AbstractPreprocessor):
             return pos_dim
         return self.samples_per_patch + pos_dim
 
-    def _build_network_inputs(self, inputs, pos):
+    def _build_network_inputs(self, inputs):
         """Construct the final input, including position encoding."""
         batch_size = inputs.shape[0]
         index_dims = inputs.shape[1:-1]
@@ -3297,7 +3331,7 @@ class PerceiverAudioPreprocessor(AbstractPreprocessor):
     def forward(self, inputs: torch.Tensor, pos: Optional[torch.Tensor] = None, network_input_is_1d: bool = True):
         inputs = torch.reshape(inputs, [inputs.shape[0], -1, self.samples_per_patch])
 
-        inputs, inputs_without_pos = self._build_network_inputs(inputs, pos)
+        inputs, inputs_without_pos = self._build_network_inputs(inputs)
         modality_sizes = None  # Size for each modality, only needed for multimodal
 
         return inputs, modality_sizes, inputs_without_pos

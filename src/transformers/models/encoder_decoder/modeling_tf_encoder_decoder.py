@@ -15,6 +15,8 @@
 """ Classes to support TF Encoder-Decoder architectures"""
 
 
+import gc
+import os
 import tempfile
 import warnings
 from typing import Optional
@@ -147,7 +149,7 @@ ENCODER_DECODER_INPUTS_DOCSTRING = r"""
         training (`bool`, *optional*, defaults to `False`):
             Whether or not to use the model in training mode (some modules like dropout modules have different
             behaviors between training and evaluation).
-        kwargs: (*optional*) Remaining dictionary of keyword arguments. Keyword arguments come in two flavors:
+        kwargs (*optional*): Remaining dictionary of keyword arguments. Keyword arguments come in two flavors:
 
             - Without a prefix which will be input as `**encoder_kwargs` for the encoder forward function.
             - With a *decoder_* prefix which will be input as `**decoder_kwargs`` for the decoder forward function.
@@ -155,7 +157,6 @@ ENCODER_DECODER_INPUTS_DOCSTRING = r"""
 
 
 def shift_tokens_right(input_ids: tf.Tensor, pad_token_id: int, decoder_start_token_id: int):
-
     if pad_token_id is None:
         raise ValueError("Make sure to set the pad_token_id attribute of the model's configuration.")
     pad_token_id = tf.cast(pad_token_id, input_ids.dtype)
@@ -171,13 +172,12 @@ def shift_tokens_right(input_ids: tf.Tensor, pad_token_id: int, decoder_start_to
         shifted_input_ids == -100, tf.fill(shape_list(shifted_input_ids), pad_token_id), shifted_input_ids
     )
 
-    if tf.executing_eagerly():
-        # "Verify that `labels` has only positive values and -100"
-        assert_gte0 = tf.debugging.assert_greater_equal(shifted_input_ids, tf.constant(0, dtype=input_ids.dtype))
+    # "Verify that `labels` has only positive values and -100"
+    assert_gte0 = tf.debugging.assert_greater_equal(shifted_input_ids, tf.constant(0, dtype=input_ids.dtype))
 
-        # Make sure the assertion op is called by wrapping the result in an identity no-op
-        with tf.control_dependencies([assert_gte0]):
-            shifted_input_ids = tf.identity(shifted_input_ids)
+    # Make sure the assertion op is called by wrapping the result in an identity no-op
+    with tf.control_dependencies([assert_gte0]):
+        shifted_input_ids = tf.identity(shifted_input_ids)
 
     return shifted_input_ids
 
@@ -270,7 +270,7 @@ class TFEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLoss):
             `Dict[str, tf.Tensor]`: The dummy inputs.
         """
         # Add `decoder_input_ids` because `self.decoder` requires it.
-        input_ids = tf.constant(DUMMY_INPUTS)
+        input_ids = tf.constant(DUMMY_INPUTS, dtype=tf.int32)
         dummy = {"input_ids": input_ids, "decoder_input_ids": input_ids}
         return dummy
 
@@ -292,24 +292,6 @@ class TFEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLoss):
     @classmethod
     def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
         r"""
-        Initializing *TFEncoderDecoderModel* from a pytorch checkpoint is not supported currently.
-
-        If there are only pytorch checkpoints for a particular encoder-decoder model, a workaround is:
-
-        ```python
-        >>> # a workaround to load from pytorch checkpoint
-        >>> from transformers import EncoderDecoderModel, TFEncoderDecoderModel
-
-        >>> _model = EncoderDecoderModel.from_pretrained("patrickvonplaten/bert2bert-cnn_dailymail-fp16")
-        >>> _model.encoder.save_pretrained("./encoder")
-        >>> _model.decoder.save_pretrained("./decoder")
-        >>> model = TFEncoderDecoderModel.from_encoder_decoder_pretrained(
-        ...     "./encoder", "./decoder", encoder_from_pt=True, decoder_from_pt=True
-        ... )
-        >>> # This is only for copying some specific attributes of this particular model.
-        >>> model.config = _model.config
-        ```
-
         Example:
 
         ```python
@@ -320,12 +302,42 @@ class TFEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLoss):
 
         from_pt = kwargs.pop("from_pt", False)
         if from_pt:
-            raise ValueError(
-                "Initializing `TFEncoderDecoderModel` from a pytorch checkpoint is not supported currently. Use a"
-                " tensorflow checkpoint instead. If only the pytorch checkpoints are available, create the encoder and"
-                " decoder models separately, and use them to initialize `TFEncoderDecoderModel`. Check"
-                " `TFEncoderDecoderModel.from_encoder_decoder_pretrained()` for more details."
-            )
+            import torch
+
+            from transformers import EncoderDecoderModel
+
+            # a workaround to load from pytorch checkpoint
+            _model = EncoderDecoderModel.from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
+            config = _model.config
+
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                encoder_dir = os.path.join(tmpdirname, "encoder")
+                decoder_dir = os.path.join(tmpdirname, "decoder")
+                _model.encoder.save_pretrained(encoder_dir)
+                _model.decoder.save_pretrained(decoder_dir)
+
+                if hasattr(_model, "enc_to_dec_proj"):
+                    enc_to_dec_proj_kernel = tf.transpose(
+                        tf.constant(_model.enc_to_dec_proj.weight.detach().to("cpu").numpy()), perm=(1, 0)
+                    )
+                    enc_to_dec_proj_bias = tf.constant(_model.enc_to_dec_proj.bias.detach().to("cpu").numpy())
+
+                del _model
+                gc.collect()
+                torch.cuda.empty_cache()
+
+                model = TFEncoderDecoderModel.from_encoder_decoder_pretrained(
+                    encoder_dir, decoder_dir, encoder_from_pt=True, decoder_from_pt=True
+                )
+                # This is only for copying some specific attributes of this particular model.
+                model.config = config
+
+                if hasattr(model, "enc_to_dec_proj"):
+                    model(model.dummy_inputs)
+                    model.enc_to_dec_proj.kernel.assign(enc_to_dec_proj_kernel)
+                    model.enc_to_dec_proj.bias.assign(enc_to_dec_proj_bias)
+
+                return model
 
         return super().from_pretrained(pretrained_model_name_or_path, *model_args, **kwargs)
 
@@ -335,7 +347,7 @@ class TFEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLoss):
         encoder_pretrained_model_name_or_path: str = None,
         decoder_pretrained_model_name_or_path: str = None,
         *model_args,
-        **kwargs
+        **kwargs,
     ) -> TFPreTrainedModel:
         r"""
         Instantiate an encoder and a decoder from one or two base classes of the library from pretrained model
@@ -560,7 +572,6 @@ class TFEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLoss):
                 )
 
         if encoder_outputs is None:
-
             encoder_inputs = {
                 "input_ids": input_ids,
                 "attention_mask": attention_mask,
@@ -679,9 +690,9 @@ class TFEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLoss):
         )
 
     def prepare_inputs_for_generation(
-        self, input_ids, past=None, attention_mask=None, use_cache=None, encoder_outputs=None, **kwargs
+        self, input_ids, past_key_values=None, attention_mask=None, use_cache=None, encoder_outputs=None, **kwargs
     ):
-        decoder_inputs = self.decoder.prepare_inputs_for_generation(input_ids, past=past)
+        decoder_inputs = self.decoder.prepare_inputs_for_generation(input_ids, past_key_values=past_key_values)
         decoder_attention_mask = decoder_inputs["attention_mask"] if "attention_mask" in decoder_inputs else None
         past_key_values = decoder_inputs.get("past_key_values")
         if past_key_values is None:
@@ -707,7 +718,3 @@ class TFEncoderDecoderModel(TFPreTrainedModel, TFCausalLanguageModelingLoss):
             " respective methods of the wrapped objects (model.encoder.resize_token_embeddings(...) or"
             " model.decoder.resize_token_embeddings(...))"
         )
-
-    def _reorder_cache(self, past, beam_idx):
-        # apply decoder cache reordering here
-        return self.decoder._reorder_cache(past, beam_idx)

@@ -591,7 +591,6 @@ class TFBertModelTester:
 
 @require_tf
 class TFBertModelTest(TFModelTesterMixin, TFCoreModelTesterMixin, unittest.TestCase):
-
     all_model_classes = (
         (
             TFBertModel,
@@ -739,6 +738,11 @@ class TFBertModelTest(TFModelTesterMixin, TFCoreModelTesterMixin, unittest.TestC
         self.assertEqual(sorted(output_loading_info["unexpected_keys"]), [])
         for layer in output_loading_info["missing_keys"]:
             self.assertTrue(layer.split("_")[0] in ["dropout", "classifier"])
+
+    # TODO (Joao): fix me
+    @unittest.skip("Onnx compliancy broke with TF 2.10")
+    def test_onnx_compliancy(self):
+        pass
 
 
 @require_tf

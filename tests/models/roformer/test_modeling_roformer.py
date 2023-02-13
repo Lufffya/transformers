@@ -361,7 +361,6 @@ class RoFormerModelTester:
 
 @require_torch
 class RoFormerModelTest(ModelTesterMixin, unittest.TestCase):
-
     all_model_classes = (
         (
             RoFormerModel,
@@ -457,7 +456,8 @@ class RoFormerModelIntegrationTest(unittest.TestCase):
     def test_inference_masked_lm(self):
         model = RoFormerForMaskedLM.from_pretrained("junnyu/roformer_chinese_base")
         input_ids = torch.tensor([[0, 1, 2, 3, 4, 5]])
-        output = model(input_ids)[0]
+        with torch.no_grad():
+            output = model(input_ids)[0]
 
         # TODO Replace vocab size
         vocab_size = 50000
@@ -490,7 +490,6 @@ class RoFormerSinusoidalPositionalEmbeddingTest(unittest.TestCase):
         )
 
     def test_positional_emb_weights_against_roformer(self):
-
         desired_weights = torch.tensor(
             [
                 [0.0000, 0.0000, 0.0000, 0.0000, 0.0000],

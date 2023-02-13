@@ -18,16 +18,19 @@ import logging
 import os
 import sys
 import threading
-from logging import CRITICAL  # NOQA
-from logging import DEBUG  # NOQA
-from logging import ERROR  # NOQA
-from logging import FATAL  # NOQA
-from logging import INFO  # NOQA
-from logging import NOTSET  # NOQA
-from logging import WARN  # NOQA
-from logging import WARNING  # NOQA
+from logging import (
+    CRITICAL,  # NOQA
+    DEBUG,  # NOQA
+    ERROR,  # NOQA
+    FATAL,  # NOQA
+    INFO,  # NOQA
+    NOTSET,  # NOQA
+    WARN,  # NOQA
+    WARNING,  # NOQA
+)
 from typing import Optional
 
+import huggingface_hub.utils as hf_hub_utils
 from tqdm import auto as tqdm_lib
 
 
@@ -65,17 +68,14 @@ def _get_default_logging_level():
 
 
 def _get_library_name() -> str:
-
     return __name__.split(".")[0]
 
 
 def _get_library_root_logger() -> logging.Logger:
-
     return logging.getLogger(_get_library_name())
 
 
 def _configure_library_root_logger() -> None:
-
     global _default_handler
 
     with _lock:
@@ -93,7 +93,6 @@ def _configure_library_root_logger() -> None:
 
 
 def _reset_library_root_logger() -> None:
-
     global _default_handler
 
     with _lock:
@@ -336,9 +335,11 @@ def enable_progress_bar():
     """Enable tqdm progress bar."""
     global _tqdm_active
     _tqdm_active = True
+    hf_hub_utils.enable_progress_bars()
 
 
 def disable_progress_bar():
     """Disable tqdm progress bar."""
     global _tqdm_active
     _tqdm_active = False
+    hf_hub_utils.disable_progress_bars()

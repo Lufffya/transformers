@@ -23,7 +23,7 @@ from transformers.models.auto import get_values
 from transformers.testing_utils import require_sentencepiece, require_tokenizers, require_torch, slow, torch_device
 from transformers.utils import cached_property
 
-from ...generation.test_generation_utils import GenerationTesterMixin
+from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, ids_tensor
 
@@ -39,6 +39,7 @@ if is_torch_available():
         LongT5Model,
     )
     from transformers.models.longt5.modeling_longt5 import LONGT5_PRETRAINED_MODEL_ARCHIVE_LIST
+    from transformers.pytorch_utils import is_torch_less_than_1_11
 
 
 class LongT5ModelTester:
@@ -70,7 +71,6 @@ class LongT5ModelTester:
         decoder_layers=None,
         large_model_config_path="google/long-t5-local-large",
     ):
-
         self.parent = parent
         self.batch_size = batch_size
         self.encoder_seq_length = encoder_seq_length
@@ -501,7 +501,6 @@ class LongT5ModelTester:
 
 @require_torch
 class LongT5ModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase):
-
     all_model_classes = (LongT5Model, LongT5ForConditionalGeneration) if is_torch_available() else ()
     all_generative_model_classes = (LongT5ForConditionalGeneration,) if is_torch_available() else ()
     fx_compatible = False
@@ -584,6 +583,10 @@ class LongT5ModelTest(ModelTesterMixin, GenerationTesterMixin, unittest.TestCase
             model = LongT5Model.from_pretrained(model_name)
             self.assertIsNotNone(model)
 
+    @unittest.skipIf(
+        not is_torch_available() or is_torch_less_than_1_11,
+        "Test failed with torch < 1.11 with an exception in a C++ file.",
+    )
     @slow
     def test_export_to_onnx(self):
         config_and_inputs = self.model_tester.prepare_config_and_inputs()
@@ -914,7 +917,6 @@ class LongT5EncoderOnlyModelTester:
         scope=None,
         large_model_config_path="google/long-t5-local-large",
     ):
-
         self.parent = parent
         self.batch_size = batch_size
         self.encoder_seq_length = encoder_seq_length

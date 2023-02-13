@@ -29,7 +29,7 @@ from transformers import (
     TFAutoModelForCausalLM,
     pipeline,
 )
-from transformers.testing_utils import is_pipeline_test, require_tf, require_torch, slow, torch_device
+from transformers.testing_utils import require_tf, require_torch, slow, torch_device
 
 from .test_pipelines_common import ANY, PipelineTestCaseMeta
 
@@ -37,7 +37,6 @@ from .test_pipelines_common import ANY, PipelineTestCaseMeta
 DEFAULT_DEVICE_NUM = -1 if torch_device == "cpu" else 0
 
 
-@is_pipeline_test
 class ConversationalPipelineTests(unittest.TestCase, metaclass=PipelineTestCaseMeta):
     model_mapping = dict(
         list(MODEL_FOR_SEQ_TO_SEQ_CAUSAL_LM_MAPPING.items())
@@ -54,7 +53,7 @@ class ConversationalPipelineTests(unittest.TestCase, metaclass=PipelineTestCaseM
         else []
     )
 
-    def get_test_pipeline(self, model, tokenizer, feature_extractor):
+    def get_test_pipeline(self, model, tokenizer, processor):
         conversation_agent = ConversationalPipeline(model=model, tokenizer=tokenizer)
         return conversation_agent, [Conversation("Hi there!")]
 

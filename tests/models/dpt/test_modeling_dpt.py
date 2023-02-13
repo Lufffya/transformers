@@ -24,7 +24,7 @@ from transformers.models.auto import get_values
 from transformers.testing_utils import require_torch, require_vision, slow, torch_device
 
 from ...test_configuration_common import ConfigTester
-from ...test_modeling_common import ModelTesterMixin, floats_tensor, ids_tensor
+from ...test_modeling_common import ModelTesterMixin, _config_zero_init, floats_tensor, ids_tensor
 
 
 if is_torch_available():
@@ -61,6 +61,7 @@ class DPTModelTester:
         attention_probs_dropout_prob=0.1,
         initializer_range=0.02,
         num_labels=3,
+        is_hybrid=False,
         scope=None,
     ):
         self.parent = parent
@@ -81,6 +82,7 @@ class DPTModelTester:
         self.initializer_range = initializer_range
         self.num_labels = num_labels
         self.scope = scope
+        self.is_hybrid = is_hybrid
         # sequence length of DPT = num_patches + 1 (we add 1 for the [CLS] token)
         num_patches = (image_size // patch_size) ** 2
         self.seq_length = num_patches + 1
@@ -111,6 +113,7 @@ class DPTModelTester:
             attention_probs_dropout_prob=self.attention_probs_dropout_prob,
             is_decoder=False,
             initializer_range=self.initializer_range,
+            is_hybrid=self.is_hybrid,
         )
 
     def create_and_check_model(self, config, pixel_values, labels):
@@ -239,6 +242,29 @@ class DPTModelTest(ModelTesterMixin, unittest.TestCase):
             loss = model(**inputs).loss
             loss.backward()
 
+    def test_initialization(self):
+        config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
+
+        configs_no_init = _config_zero_init(config)
+        for model_class in self.all_model_classes:
+            model = model_class(config=configs_no_init)
+            # Skip the check for the backbone
+            backbone_params = []
+            for name, module in model.named_modules():
+                if module.__class__.__name__ == "DPTViTHybridEmbeddings":
+                    backbone_params = [f"{name}.{key}" for key in module.state_dict().keys()]
+                    break
+
+            for name, param in model.named_parameters():
+                if param.requires_grad:
+                    if name in backbone_params:
+                        continue
+                    self.assertIn(
+                        ((param.data.mean() * 1e9).round() / 1e9).item(),
+                        [0.0, 1.0],
+                        msg=f"Parameter {name} of model {model_class} seems not properly initialized",
+                    )
+
     @slow
     def test_model_from_pretrained(self):
         for model_name in DPT_PRETRAINED_MODEL_ARCHIVE_LIST[:1]:
@@ -298,3 +324,24 @@ class DPTModelIntegrationTest(unittest.TestCase):
         ).to(torch_device)
 
         self.assertTrue(torch.allclose(outputs.logits[0, 0, :3, :3], expected_slice, atol=1e-4))
+
+    def test_post_processing_semantic_segmentation(self):
+        feature_extractor = DPTFeatureExtractor.from_pretrained("Intel/dpt-large-ade")
+        model = DPTForSemanticSegmentation.from_pretrained("Intel/dpt-large-ade").to(torch_device)
+
+        image = prepare_img()
+        inputs = feature_extractor(images=image, return_tensors="pt").to(torch_device)
+
+        # forward pass
+        with torch.no_grad():
+            outputs = model(**inputs)
+
+        outputs.logits = outputs.logits.detach().cpu()
+
+        segmentation = feature_extractor.post_process_semantic_segmentation(outputs=outputs, target_sizes=[(500, 300)])
+        expected_shape = torch.Size((500, 300))
+        self.assertEqual(segmentation[0].shape, expected_shape)
+
+        segmentation = feature_extractor.post_process_semantic_segmentation(outputs=outputs)
+        expected_shape = torch.Size((480, 480))
+        self.assertEqual(segmentation[0].shape, expected_shape)

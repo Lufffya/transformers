@@ -21,7 +21,7 @@ from transformers import BlenderbotSmallConfig, is_torch_available
 from transformers.testing_utils import require_torch, slow, torch_device
 from transformers.utils import cached_property
 
-from ...generation.test_generation_utils import GenerationTesterMixin
+from ...generation.test_utils import GenerationTesterMixin
 from ...test_configuration_common import ConfigTester
 from ...test_modeling_common import ModelTesterMixin, ids_tensor
 
@@ -297,7 +297,6 @@ class Blenderbot90MIntegrationTests(unittest.TestCase):
 
     @slow
     def test_90_generation_from_long_input(self):
-
         src_text = [
             "Social anxiety\nWow, I am never shy. Do you have anxiety?\nYes. I end up sweating and blushing and feel"
             " like       i'm going to throw up.\nand why is that?"

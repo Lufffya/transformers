@@ -27,9 +27,9 @@ from typing import List
 
 import torch
 import torch.nn as nn
+from huggingface_hub import cached_download, hf_hub_download
 from torch import Tensor
 
-from huggingface_hub import cached_download, hf_hub_download
 from transformers import AutoFeatureExtractor, VanConfig, VanForImageClassification
 from transformers.models.van.modeling_van import VanLayerScaling
 from transformers.utils import logging
@@ -168,9 +168,9 @@ def convert_weights_and_push(save_directory: Path, model_name: str = None, push_
     filename = "imagenet-1k-id2label.json"
     num_labels = 1000
 
-    repo_id = "datasets/huggingface/label-files"
+    repo_id = "huggingface/label-files"
     num_labels = num_labels
-    id2label = json.load(open(hf_hub_download(repo_id, filename), "r"))
+    id2label = json.load(open(hf_hub_download(repo_id, filename, repo_type="dataset"), "r"))
     id2label = {int(k): v for k, v in id2label.items()}
 
     id2label = id2label

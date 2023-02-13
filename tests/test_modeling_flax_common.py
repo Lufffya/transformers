@@ -21,10 +21,10 @@ import unittest
 from typing import List, Tuple
 
 import numpy as np
-
-import transformers
 from huggingface_hub import HfFolder, delete_repo, set_access_token
 from requests.exceptions import HTTPError
+
+import transformers
 from transformers import BertConfig, is_flax_available, is_torch_available
 from transformers.models.auto import get_values
 from transformers.testing_utils import (
@@ -36,7 +36,7 @@ from transformers.testing_utils import (
     require_flax,
     torch_device,
 )
-from transformers.utils import logging
+from transformers.utils import CONFIG_NAME, GENERATION_CONFIG_NAME, logging
 from transformers.utils.generic import ModelOutput
 
 
@@ -48,6 +48,7 @@ if is_flax_available():
     from flax.core.frozen_dict import FrozenDict, freeze, unfreeze
     from flax.serialization import from_bytes
     from flax.traverse_util import flatten_dict, unflatten_dict
+
     from transformers import (
         FLAX_MODEL_FOR_QUESTION_ANSWERING_MAPPING,
         FLAX_MODEL_FOR_SEQUENCE_CLASSIFICATION_MAPPING,
@@ -275,7 +276,6 @@ class FlaxModelTesterMixin:
 
         for model_class in self.all_model_classes:
             with self.subTest(model_class.__name__):
-
                 # Output all for aggressive testing
                 config.output_hidden_states = True
                 config.output_attentions = self.has_attentions
@@ -328,7 +328,6 @@ class FlaxModelTesterMixin:
 
         for model_class in self.all_model_classes:
             with self.subTest(model_class.__name__):
-
                 # Output all for aggressive testing
                 config.output_hidden_states = True
                 config.output_attentions = self.has_attentions
@@ -395,6 +394,13 @@ class FlaxModelTesterMixin:
                 # verify that normal save_pretrained works as expected
                 with tempfile.TemporaryDirectory() as tmpdirname:
                     model.save_pretrained(tmpdirname)
+
+                    # the config file (and the generation config file, if it can generate) should be saved
+                    self.assertTrue(os.path.exists(os.path.join(tmpdirname, CONFIG_NAME)))
+                    self.assertEqual(
+                        model.can_generate(), os.path.exists(os.path.join(tmpdirname, GENERATION_CONFIG_NAME))
+                    )
+
                     model_loaded = model_class.from_pretrained(tmpdirname)
 
                 outputs_loaded = model_loaded(**prepared_inputs_dict).to_tuple()
@@ -562,7 +568,6 @@ class FlaxModelTesterMixin:
 
                 self.assertEqual(len(outputs), len(jitted_outputs))
                 for jitted_output, output in zip(jitted_outputs, outputs):
-
                     self.assertEqual(jitted_output.shape, output.shape)
 
     def test_forward_signature(self):
@@ -645,6 +650,9 @@ class FlaxModelTesterMixin:
             check_hidden_states_output(inputs_dict, config, model_class)
 
     def test_attention_outputs(self):
+        if not self.has_attentions:
+            self.skipTest(reason="Model does not output attentions")
+
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
         config.return_dict = True
 
@@ -776,7 +784,7 @@ class FlaxModelTesterMixin:
         for model_class in self.all_model_classes:
             # check if all params are still in float32 when dtype of computation is half-precision
             model = model_class(config, dtype=jnp.float16)
-            types = jax.tree_map(lambda x: x.dtype, model.params)
+            types = jax.tree_util.tree_map(lambda x: x.dtype, model.params)
             types = flatten_dict(types)
 
             for name, type_ in types.items():
@@ -790,7 +798,7 @@ class FlaxModelTesterMixin:
 
             # cast all params to bf16
             params = model.to_bf16(model.params)
-            types = flatten_dict(jax.tree_map(lambda x: x.dtype, params))
+            types = flatten_dict(jax.tree_util.tree_map(lambda x: x.dtype, params))
             # test if all params are in bf16
             for name, type_ in types.items():
                 self.assertEqual(type_, jnp.bfloat16, msg=f"param {name} is not in bf16.")
@@ -802,7 +810,7 @@ class FlaxModelTesterMixin:
             mask = unflatten_dict(mask)
 
             params = model.to_bf16(model.params, mask)
-            types = flatten_dict(jax.tree_map(lambda x: x.dtype, params))
+            types = flatten_dict(jax.tree_util.tree_map(lambda x: x.dtype, params))
             # test if all params are in bf16 except key
             for name, type_ in types.items():
                 if name == key:
@@ -818,7 +826,7 @@ class FlaxModelTesterMixin:
 
             # cast all params to fp16
             params = model.to_fp16(model.params)
-            types = flatten_dict(jax.tree_map(lambda x: x.dtype, params))
+            types = flatten_dict(jax.tree_util.tree_map(lambda x: x.dtype, params))
             # test if all params are in fp16
             for name, type_ in types.items():
                 self.assertEqual(type_, jnp.float16, msg=f"param {name} is not in fp16.")
@@ -830,7 +838,7 @@ class FlaxModelTesterMixin:
             mask = unflatten_dict(mask)
 
             params = model.to_fp16(model.params, mask)
-            types = flatten_dict(jax.tree_map(lambda x: x.dtype, params))
+            types = flatten_dict(jax.tree_util.tree_map(lambda x: x.dtype, params))
             # test if all params are in fp16 except key
             for name, type_ in types.items():
                 if name == key:
@@ -849,7 +857,7 @@ class FlaxModelTesterMixin:
             params = model.to_fp32(params)
 
             # test if all params are in fp32
-            types = flatten_dict(jax.tree_map(lambda x: x.dtype, params))
+            types = flatten_dict(jax.tree_util.tree_map(lambda x: x.dtype, params))
             for name, type_ in types.items():
                 self.assertEqual(type_, jnp.float32, msg=f"param {name} is not in fp32.")
 
@@ -864,7 +872,7 @@ class FlaxModelTesterMixin:
             params = model.to_fp32(params, mask)
 
             # test if all params are in fp32 except key
-            types = flatten_dict(jax.tree_map(lambda x: x.dtype, params))
+            types = flatten_dict(jax.tree_util.tree_map(lambda x: x.dtype, params))
             for name, type_ in types.items():
                 if name == key:
                     self.assertEqual(type_, jnp.float16, msg=f"param {name} should be in fp16.")
@@ -884,7 +892,7 @@ class FlaxModelTesterMixin:
 
             # load the weights again and check if they are still in fp16
             model = model_class.from_pretrained(tmpdirname)
-            types = flatten_dict(jax.tree_map(lambda x: x.dtype, model.params))
+            types = flatten_dict(jax.tree_util.tree_map(lambda x: x.dtype, model.params))
             for name, type_ in types.items():
                 self.assertEqual(type_, jnp.float16, msg=f"param {name} is not in fp16.")
 
@@ -901,7 +909,7 @@ class FlaxModelTesterMixin:
 
             # load the weights again and check if they are still in fp16
             model = model_class.from_pretrained(tmpdirname)
-            types = flatten_dict(jax.tree_map(lambda x: x.dtype, model.params))
+            types = flatten_dict(jax.tree_util.tree_map(lambda x: x.dtype, model.params))
             for name, type_ in types.items():
                 self.assertEqual(type_, jnp.bfloat16, msg=f"param {name} is not in bf16.")
 
@@ -1099,6 +1107,14 @@ class FlaxModelTesterMixin:
                 for p1, p2 in zip(flatten_dict(model.params).values(), flatten_dict(new_model.params).values()):
                     self.assertTrue(np.allclose(np.array(p1), np.array(p2)))
 
+    @is_pt_flax_cross_test
+    def test_from_sharded_pt(self):
+        model = FlaxBertModel.from_pretrained("hf-internal-testing/tiny-random-bert-sharded", from_pt=True)
+        ref_model = FlaxBertModel.from_pretrained("hf-internal-testing/tiny-random-bert-fx-only")
+        for key, ref_val in flatten_dict(ref_model.params).items():
+            val = flatten_dict(model.params)[key]
+            assert np.allclose(np.array(val), np.array(ref_val))
+
     def test_gradient_checkpointing(self):
         config, inputs_dict = self.model_tester.prepare_config_and_inputs_for_common()
 
@@ -1213,3 +1229,68 @@ class FlaxModelPushToHubTester(unittest.TestCase):
         for key in base_params.keys():
             max_diff = (base_params[key] - new_params[key]).sum().item()
             self.assertLessEqual(max_diff, 1e-3, msg=f"{key} not identical")
+
+
+def check_models_equal(model1, model2):
+    models_are_equal = True
+    flat_params_1 = flatten_dict(model1.params)
+    flat_params_2 = flatten_dict(model2.params)
+    for key in flat_params_1.keys():
+        if np.sum(np.abs(flat_params_1[key] - flat_params_2[key])) > 1e-4:
+            models_are_equal = False
+
+    return models_are_equal
+
+
+@require_flax
+class FlaxModelUtilsTest(unittest.TestCase):
+    def test_model_from_pretrained_subfolder(self):
+        config = BertConfig.from_pretrained("hf-internal-testing/tiny-bert-flax-only")
+        model = FlaxBertModel(config)
+
+        subfolder = "bert"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(os.path.join(tmp_dir, subfolder))
+
+            with self.assertRaises(OSError):
+                _ = FlaxBertModel.from_pretrained(tmp_dir)
+
+            model_loaded = FlaxBertModel.from_pretrained(tmp_dir, subfolder=subfolder)
+
+        self.assertTrue(check_models_equal(model, model_loaded))
+
+    def test_model_from_pretrained_subfolder_sharded(self):
+        config = BertConfig.from_pretrained("hf-internal-testing/tiny-bert-flax-only")
+        model = FlaxBertModel(config)
+
+        subfolder = "bert"
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model.save_pretrained(os.path.join(tmp_dir, subfolder), max_shard_size="10KB")
+
+            with self.assertRaises(OSError):
+                _ = FlaxBertModel.from_pretrained(tmp_dir)
+
+            model_loaded = FlaxBertModel.from_pretrained(tmp_dir, subfolder=subfolder)
+
+        self.assertTrue(check_models_equal(model, model_loaded))
+
+    def test_model_from_pretrained_hub_subfolder(self):
+        subfolder = "bert"
+        model_id = "hf-internal-testing/tiny-random-bert-subfolder"
+
+        with self.assertRaises(OSError):
+            _ = FlaxBertModel.from_pretrained(model_id)
+
+        model = FlaxBertModel.from_pretrained(model_id, subfolder=subfolder)
+
+        self.assertIsNotNone(model)
+
+    def test_model_from_pretrained_hub_subfolder_sharded(self):
+        subfolder = "bert"
+        model_id = "hf-internal-testing/tiny-random-bert-sharded-subfolder"
+        with self.assertRaises(OSError):
+            _ = FlaxBertModel.from_pretrained(model_id)
+
+        model = FlaxBertModel.from_pretrained(model_id, subfolder=subfolder)
+
+        self.assertIsNotNone(model)

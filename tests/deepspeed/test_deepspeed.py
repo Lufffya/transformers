@@ -19,10 +19,12 @@ import json
 import os
 import unittest
 from copy import deepcopy
+from functools import partial
 
 import datasets
 from parameterized import parameterized
 
+import tests.trainer.test_trainer
 from tests.trainer.test_trainer import TrainerIntegrationCommon  # noqa
 from transformers import AutoModel, TrainingArguments, is_torch_available, logging
 from transformers.deepspeed import HfDeepSpeedConfig, is_deepspeed_available, unset_hf_deepspeed_config
@@ -49,8 +51,10 @@ if is_torch_available():
     from tests.trainer.test_trainer import (  # noqa
         RegressionModelConfig,
         RegressionPreTrainedModel,
-        get_regression_trainer,
     )
+
+    # hack to restore original logging level pre #21700
+    get_regression_trainer = partial(tests.trainer.test_trainer.get_regression_trainer, log_level="info")
 
 
 set_seed(42)
@@ -361,16 +365,19 @@ class TrainerIntegrationDeepSpeed(TrainerIntegrationDeepSpeedWithCustomConfig, T
         self.assertNotEqual(new_a, a)
 
     def test_hf_scheduler_ds_optimizer(self):
-        a = 0
         with mockenv_context(**self.dist_env_1_gpu):
             ds_config_zero2_dict = self.get_config_dict(ZERO2)
             del ds_config_zero2_dict["scheduler"]  # force default HF Trainer scheduler
             ds_config_zero2_dict["zero_optimization"]["offload_optimizer"]["device"] = "none"
             ds_config_zero2_dict["fp16"]["initial_scale_power"] = 1  # force optimizer on the first step
             trainer = get_regression_trainer(local_rank=0, fp16=True, deepspeed=ds_config_zero2_dict)
-            trainer.train()
-        new_a = trainer.model.a.item()
-        self.assertNotEqual(new_a, a)
+            with self.assertRaises(Exception) as context:
+                trainer.train()
+        self.assertIn(
+            "Found `optimizer` configured in the DeepSpeed config, but no `scheduler`. "
+            "Please configure a scheduler in the DeepSpeed config.",
+            str(context.exception),
+        )
 
     @require_deepspeed_aio
     def test_stage3_nvme_offload(self):
@@ -422,6 +429,7 @@ class TrainerIntegrationDeepSpeed(TrainerIntegrationDeepSpeedWithCustomConfig, T
         del ds_config_dict["optimizer"]  # force default HF Trainer optimizer
         # force cpu offload
         ds_config_dict["zero_optimization"]["offload_optimizer"]["device"] = "cpu"
+        ds_config_dict["zero_force_ds_cpu_optimizer"] = False  # offload is not efficient w/o CPUAdam
         with mockenv_context(**self.dist_env_1_gpu):
             kwargs = {"local_rank": 0, "deepspeed": ds_config_dict}
             kwargs[dtype] = True
@@ -746,6 +754,8 @@ class TrainerIntegrationDeepSpeed(TrainerIntegrationDeepSpeedWithCustomConfig, T
             config = deepspeed_config()
             self.assertTrue(bool(config), "Deepspeed config should be accessible")
 
+            # with accelerate integration below line is additionally required for this test to pass
+            trainer.accelerator.state._reset_state()
             del trainer
             # now weakref should gc the global and we shouldn't get anything here
             config = deepspeed_config()
@@ -772,13 +782,14 @@ class TrainerIntegrationDeepSpeed(TrainerIntegrationDeepSpeedWithCustomConfig, T
         ds_config_dict = self.get_config_dict(stage)
         del ds_config_dict["optimizer"]  # will use HF Trainer optimizer
         del ds_config_dict["scheduler"]  # will use HF Trainer scheduler
+        ds_config_dict["zero_force_ds_cpu_optimizer"] = False  # offload is not efficient w/o CPUAdam
         # must use this setting to get the reload path exercised
         ds_config_dict["zero_optimization"]["stage3_gather_16bit_weights_on_model_save"] = True
 
         with mockenv_context(**self.dist_env_1_gpu):
             args_dict = {
-                "per_gpu_train_batch_size": 1,
-                "per_gpu_eval_batch_size": 1,
+                "per_device_train_batch_size": 1,
+                "per_device_eval_batch_size": 1,
                 "gradient_accumulation_steps": 1,
                 "learning_rate": 1e-4,
                 "num_train_epochs": 1,
@@ -863,8 +874,8 @@ class TestDeepSpeedWithLauncher(TestCasePlus):
     # 2. most tests should probably be run on both: zero2 and zero3 configs
     #
 
-    @require_torch_multi_gpu
     @parameterized.expand(params, name_func=parameterized_custom_name_func)
+    @require_torch_multi_gpu
     def test_basic_distributed(self, stage, dtype):
         self.run_and_check(stage=stage, dtype=dtype, distributed=True)
 
@@ -894,8 +905,8 @@ class TestDeepSpeedWithLauncher(TestCasePlus):
             fp32=True,
         )
 
-    @require_torch_multi_gpu
     @parameterized.expand(params, name_func=parameterized_custom_name_func)
+    @require_torch_multi_gpu
     def test_fp32_distributed(self, stage, dtype):
         # real model needs too much GPU memory under stage2+fp32, so using tiny random model here -
         # therefore no quality checks, just basic completion checks are done
@@ -935,8 +946,8 @@ class TestDeepSpeedWithLauncher(TestCasePlus):
 
         self.do_checks(output_dir, do_train=do_train, do_eval=do_eval)
 
-    @require_torch_multi_gpu
     @parameterized.expand(["bf16", "fp16", "fp32"])
+    @require_torch_multi_gpu
     def test_inference(self, dtype):
         if dtype == "bf16" and not is_torch_bf16_gpu_available():
             self.skipTest("test requires bfloat16 hardware support")
